@@ -1,0 +1,90 @@
+# Paresh-Maheshwari/paresh-patches
+
+***Release Version: [v1.20.0](https://gitlab.com/Paresh-Maheshwari/paresh-patches/-/releases/v1.20.0)***  
+***Release Date: September 01, 2026, 16:37:52 UTC***  
+<details>
+<summary><b><i>Changelog:</i></b></summary>
+
+# [1.20.0](https://gitlab.com/Paresh-Maheshwari/paresh-patches/compare/v1.19.0...v1.20.0) (2026-09-01)
+
+
+### Bug Fixes
+
+* add hiddenapibypass dependency for Plus Messenger signature spoof ([5beb880](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/5beb8807946a020e88c4060cac26335d2197ff91))
+* correct Telegram web target to 12.9.2 (closes [#112](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/112)) ([66c3408](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/66c3408339fae9a2d70d9c2bb8f05068d07227b9))
+* restore Plus Messenger push on re-signed app + support 12.9.2.0 (closes [#114](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/114), closes [#106](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/106)) ([f4c99b7](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/f4c99b7a4d120d98e10bafb4b81dd35508803410))
+* restore TaskManager pro notification service on 1.5.2 ([3a5b67a](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/3a5b67afad29ad3a9c9311ecad3a08db5fb594b9))
+* restore TickTick push sync on re-signed app + support 8.1.3.3 ([0d2aaf4](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/0d2aaf4da7b5ef8836ca0ff9b7236429718b3484))
+* restore TickTick reminder alarms on re-signed 8.1.3.3 ([411df92](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/411df927b2d198a4afc1af5cce1feac37b63763c))
+* support Lumina Walls 1.0.2.4, update PairIP validateResponse fingerprint (closes [#113](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/113)) ([758fdf6](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/758fdf6f2eaec121122a045b1edc0b8c7b2d5e96))
+* support Proton VPN 5.19.72.0 (closes [#118](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/118)) ([1c6d656](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/1c6d656a1a839167c04b3efc0a2accf712f3e1ca))
+* support TaskManager 1.5.2, remove obsolete DiskScreen (closes [#117](https://gitlab.com/Paresh-Maheshwari/paresh-patches/issues/117)) ([10ff8b8](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/10ff8b83d02a08fd46d223dd754f59e1faddf54f))
+* update recommended versions for ProtonVPN, Plus Messenger and Telegram ([7123d1c](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/7123d1c9c068fdc4d7752f2ff4965029595cacb6))
+
+
+### Features
+
+* add HabitKit premium patch ([c22cb6f](https://gitlab.com/Paresh-Maheshwari/paresh-patches/commit/c22cb6fa71b655700c829e6fa329d79c27d259e3))
+</details>
+
+# hoo-dles/morphe-patches
+
+***Release Version: [v1.43.0](https://github.com/hoo-dles/morphe-patches/releases/tag/v1.43.0)***  
+***Release Date: August 30, 2026, 00:32:47 UTC***  
+<details>
+<summary><b><i>Changelog:</i></b></summary>
+
+# [1.43.0](https://github.com/hoo-dles/morphe-patches/compare/v1.42.0...v1.43.0) (2026-08-30)
+
+
+### Bug Fixes
+
+* **AdGuard:** Add version code for correct APK discovery ([d08ac92](https://github.com/hoo-dles/morphe-patches/commit/d08ac92d55211c5b9faef91d94245cd076ed0550))
+* **Niagara:** Bump supported version to `1.16.24` and fix patch failure ([d2344ae](https://github.com/hoo-dles/morphe-patches/commit/d2344ae2726b5ab5f7e14fa75e52d0990a8a22e5))
+* **Showly:** Fix news feed not loading ([828698e](https://github.com/hoo-dles/morphe-patches/commit/828698efb3ece50b5e07a9cc8dcc4c4d3b1490e0))
+
+
+### Features
+
+* **Bend:** Add `Enable Premium` patch ([d3ee74f](https://github.com/hoo-dles/morphe-patches/commit/d3ee74f73ad1239cb580a485e1c0bc97ab0510f1))
+
+
+
+</details>
+
+# MorpheApp/morphe-desktop
+
+***Release Version: [v1.14.0](https://github.com/MorpheApp/morphe-desktop/releases/tag/v1.14.0)***  
+***Release Date: August 25, 2026, 12:37:50 UTC***  
+<details>
+<summary><b><i>Changelog:</i></b></summary>
+
+# [1.14.0](https://github.com/MorpheApp/morphe-desktop/compare/v1.13.2...v1.14.0) (2026-08-25)
+
+
+### Bug Fixes
+
+* Update to latest Patcher ([491535c](https://github.com/MorpheApp/morphe-desktop/commit/491535c40d130a216a49f4a89262b0f94dd46616))
+* Update to latest Patcher ([b1bfa5c](https://github.com/MorpheApp/morphe-desktop/commit/b1bfa5ce690837154c5d81be5dd1bb033b19e971))
+
+
+### Features
+
+* Add patch context `fileWorkspace` ([#264](https://github.com/MorpheApp/morphe-desktop/issues/264)) ([1766a64](https://github.com/MorpheApp/morphe-desktop/commit/1766a640620304f85474798f8db32693115b617a))
+* Show version codes in `list-versions` and `list-patches` ([#262](https://github.com/MorpheApp/morphe-desktop/issues/262)) ([f19352a](https://github.com/MorpheApp/morphe-desktop/commit/f19352a982ae6287b99085835cc1772e36cee164))
+</details>
+
+# REAndroid/APKEditor
+
+***Release Version: [V1.4.9](https://github.com/REAndroid/APKEditor/releases/tag/V1.4.9)***  
+***Release Date: May 19, 2026, 11:25:01 UTC***  
+<details>
+<summary><b><i>Changelog:</i></b></summary>
+
+## What's Changed
+* Fix: Merging issue #228 
+* Fix: Smali wide register handling #229 
+
+
+**Full Changelog**: https://github.com/REAndroid/APKEditor/compare/V1.4.8...V1.4.9</details>
+
