@@ -1,0 +1,36 @@
+name: Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'   # weekly, Monday 06:00 UTC — change or remove as you like
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch IMXEren/rvx-builds and update sync branch
+        run: |
+          git remote add upstream https://github.com/IMXEren/rvx-builds.git
+          git fetch upstream main
+          git checkout -B upstream-sync upstream/main
+          git push origin upstream-sync --force
+
+      - name: Open pull request into main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr create \
+            --base main \
+            --head upstream-sync \
+            --title "chore: merge upstream" \
+            --body "Automated sync from IMXEren/rvx-builds main. Resolve any conflicts via the web UI." \
+            || echo "PR already exists or nothing new to sync"
