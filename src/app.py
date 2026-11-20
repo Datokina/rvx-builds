@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from src._bundle_selector import parse_patch_selection
 from src.apks.repack import get_apk_version
 from src.cli_args import merge_cli_arg_maps
 from src.config import RevancedConfig
@@ -57,8 +58,19 @@ class APP(object):
         # Keep backward compatibility
         self.patches_dl = patches_dl_raw
 
-        self.exclude_request: list[str] = config.env.list(f"{app_name}_EXCLUDE_PATCH".upper(), [])
-        self.include_request: list[str] = config.env.list(f"{app_name}_INCLUDE_PATCH".upper(), [])
+        key = app_name.upper()
+        selection = config.env.str(f"{key}_PATCH_SELECTION", None)
+        legacy_include = config.env.str(f"{key}_INCLUDE_PATCH", None)
+        legacy_exclude = config.env.str(f"{key}_EXCLUDE_PATCH", None)
+        legacy = legacy_include is not None or legacy_exclude is not None
+        if legacy:
+            logger.warning(f"{key}_INCLUDE_PATCH and {key}_EXCLUDE_PATCH are deprecated. Use {key}_PATCH_SELECTION.")
+        if selection is None:
+            includes = [f"+{name.strip()}" for name in (legacy_include or "").split(",") if name.strip()]
+            excludes = [f"-{name.strip()}" for name in (legacy_exclude or "").split(",") if name.strip()]
+            selection = ",".join(["APP" if legacy else "DEFAULT", *includes, *excludes])
+        self.patch_selection = selection
+        self.selection_base, self.selection_overrides = parse_patch_selection(selection)
         self.resource: dict[str, dict[str, str]] = {}
         self.patch_bundles: list[dict[str, str]] = []  # Store multiple patch bundles
         self.no_of_patches: int = 0
@@ -73,6 +85,7 @@ class APP(object):
         self.old_key = config.env.bool(f"{app_name}_OLD_KEY".upper(), config.global_old_key)
         self.patches: list[dict[Any, Any]] = []
         self.compatible_versions: set[str] = set()
+        self.compatible_version_codes: dict[str, int] = {}
         self.normalize_patch_names = config.env.bool(
             f"{app_name}_NORMALIZE_PATCH_NAMES".upper(),
             config.global_normalize_patch_names,
@@ -233,7 +246,7 @@ class APP(object):
     def _build_identity(self: Self) -> str:
         """Build a stable identity string for fingerprinting the build configuration.
 
-        Captures CLI, patch bundles, include/exclude lists, options,
+        Captures CLI, ordered patch bundles, patch selection, options,
         architectures, and CLI argument config so any input change produces
         a different output filename and Obtainium detects an update.
 
@@ -255,16 +268,11 @@ class APP(object):
 
         # Patch bundles
         parts.append(
-            "|".join(norm_hash for norm_hash in self.compute_pb_norm_hashes(sort=True)),
+            "|".join(self.compute_pb_norm_hashes()),
         )
 
-        # Patch include / exclude
-        include_request: list[str] = getattr(self, "include_request", []) or []
-        exclude_request: list[str] = getattr(self, "exclude_request", []) or []
-        if include_request:
-            parts.append(f"include:{','.join(sorted(include_request))}")
-        if exclude_request:
-            parts.append(f"exclude:{','.join(sorted(exclude_request))}")
+        # Patch selection
+        parts.append(f"selection:{getattr(self, 'patch_selection', 'DEFAULT')}")
 
         # Patch options
         options_raw: str = getattr(self, "options_raw", "") or ""
