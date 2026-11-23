@@ -1,21 +1,48 @@
 """Downloader Class."""
 
+from dataclasses import dataclass
 from typing import Any, Self, cast
+from urllib.parse import urlsplit
+lazy from collections.abc import Collection
 
 import turbohtml
 from loguru import logger
 
-from src.apks.variant_sorter import VariantSorter
-from src.app import APP
+from src.apks.variant_sorter import Arch, Density, VariantSorter
+from src.apks.version_sorter import VersionSorter
 from src.downloader.download import Downloader
+from src.downloader.morphe_resolver import resolve_download_page
 from src.downloader.sources import APK_MIRROR_BASE_URL
 from src.exceptions import APKMirrorAPKDownloadError, ScrapingError, VersionNotFoundError
 from src.utils import (
+    apkmirror_status_check,
     handle_request_response,
     make_request,
     request_header,
     slugify,
 )
+lazy from src.app import APP
+
+# Listing and upload pages scraped when the direct release URL guess misses.
+LISTING_PAGES = 3
+# Index of `<category>` in an `apk/<developer>/<category>/<slug>` source path.
+CATEGORY_SEGMENT = 2
+# `secondary` builds are alternate packages.
+UNSTABLE_RELEASE_MARKERS = ("alpha", "beta", "secondary")
+DEFAULT_RESOLVER_ABI = "arm64-v8a"
+# A variant page's parent is its release page.
+VARIANT_PAGE_MARKER = "-android-apk-download"
+
+
+@dataclass(frozen=True, slots=True)
+class MirrorVariant:
+    """One row of an APKMirror release's variants table."""
+
+    type: str  ## APK or BUNDLE badge
+    url: str
+    archs: list[Arch]
+    density: Density | None
+    codes: frozenset[int]  ## Android version codes shown in the row
 
 
 class ApkMirror(Downloader):
@@ -122,10 +149,11 @@ class ApkMirror(Downloader):
         preserve_bundle = app.effective_cli_argsf == "morphe-cli"
         return self._extract_download_link(page, app.app_name, preserve_bundle=preserve_bundle)
 
-    def get_download_page(self: Self, main_page: str) -> str:
+    def get_download_page(self: Self, main_page: str, version_codes: Collection[int] = ()) -> str:
         """Function to get the download page in apk_mirror.
 
         :param main_page: Main Download Page in APK mirror(Index)
+        :param version_codes: Version codes the patches target, preferred over arch and density
         :return:
         """
         try:
@@ -145,8 +173,7 @@ class ApkMirror(Downloader):
             msg = "Unable to find APKMirror variants table on release page"
             raise APKMirrorAPKDownloadError(msg, url=main_page)
         table_rows = variants_container.select(".table-row.headerFont")
-        apk_variants: list[dict[str, Any]] = []
-        bundle_variants: list[dict[str, Any]] = []
+        variants: list[MirrorVariant] = []
 
         for row in table_rows:
             accent = row.find(class_="accent_color")
@@ -155,56 +182,52 @@ class ApkMirror(Downloader):
             badge = row.find(class_="apkm-badge")
             if not badge:
                 continue
-            apk_type = "".join(badge.strings)
-            sub_url = accent.attr("href")
             text = row.text.strip()
+            variants.append(
+                MirrorVariant(
+                    type="".join(badge.strings),
+                    url=f"{APK_MIRROR_BASE_URL}{accent.attr('href')}",
+                    archs=VariantSorter.parse_archs(text, delimiter=None),
+                    density=VariantSorter.parse_density(text),
+                    # The variant cell shows the version code in a plain colorLightBlack span, next to the date span.
+                    codes=frozenset(
+                        int(code)
+                        for span in row.select("span.colorLightBlack")
+                        if (code := "".join(span.strings).strip()).isdigit()
+                    ),
+                ),
+            )
 
-            archs = VariantSorter.parse_archs(text, delimiter=None)
-            density = VariantSorter.parse_density(text)
-
-            variant = {
-                "type": apk_type,
-                "url": f"{APK_MIRROR_BASE_URL}{sub_url}",
-                "archs": archs,
-                "density": density,
-            }
-
-            if apk_type == "BUNDLE":
-                bundle_variants.append(variant)
-            else:
-                apk_variants.append(variant)
-
-        # Sort best-first within each type
-        apk_variants.sort(
-            key=lambda v: VariantSorter.sorting_key(v["archs"], v["density"]),
-            reverse=True,
-        )
-        bundle_variants.sort(
-            key=lambda v: VariantSorter.sorting_key(v["archs"], v["density"]),
-            reverse=True,
-        )
-
-        # Prefer APK, fall back to BUNDLE
-        if apk_variants:
-            selected = apk_variants[0]
-        elif bundle_variants:
-            selected = bundle_variants[0]
-        else:
+        if not variants:
             msg = "Unable to extract download page"
             raise APKMirrorAPKDownloadError(msg, url=main_page)
 
-        self.apk_type = selected["type"]
-        selected_url: str = selected["url"]
-        return selected_url
+        # Variants of one version are separate builds, so patch fingerprints only match the targeted codes.
+        if version_codes:
+            matching = [v for v in variants if v.codes & set(version_codes)]
+            if matching:
+                variants = matching
+            else:
+                logger.warning(f"No APKMirror variant matches version codes {sorted(version_codes)} on {main_page}")
+
+        # Prefer APK over BUNDLE, then the best arch and density.
+        selected = max(
+            variants,
+            key=lambda v: (v.type != "BUNDLE", VariantSorter.sorting_key(v.archs, v.density)),
+        )
+        logger.debug(f"Selected APKMirror variant with version codes {sorted(selected.codes)}: {selected.url}")
+        self.apk_type = selected.type
+        return selected.url
 
     @staticmethod
     def _version_matches_title(version: str, title: str) -> bool:
-        """Return whether an APKMirror app-row title refers to the requested version."""
-        if version in title:
-            return True
+        """Return whether an APKMirror app-row title refers to the requested version.
+
+        The version must be a whole word, so `445.0.0.0.3` does not match `445.0.0.0.37 alpha`.
+        """
+        words = title.split()
         # Piko advertises `release-ripped` versions while APKMirror stores the matching upstream `release` APK.
-        apk_mirror_version = version.replace("-ripped", "")
-        return apk_mirror_version in title
+        return version in words or version.replace("-ripped", "") in words
 
     @staticmethod
     def _guess_release_url(download_source: str, version: str) -> str:
@@ -217,10 +240,96 @@ class ApkMirror(Downloader):
           version: 20.51.39
           result: https://www.apkmirror.com/apk/google-inc/youtube/youtube-20-51-39-release/
         """
-        app_main_page = download_source
+        # Piko advertises `release-ripped` versions while APKMirror stores the matching upstream `release` APK.
         # APKMirror normalizes version separators to dashes inside release slugs.
-        version_slug = version.replace(".", "-")
-        return f"{app_main_page}-{version_slug}-release/"
+        version_slug = version.replace("-ripped", "").replace(".", "-")
+        return f"{download_source}-{version_slug}-release/"
+
+    @staticmethod
+    def _listing_path(download_source: str) -> str:
+        """Return the `/apk/<developer>/<category>/` listing path of an app source URL."""
+        path = download_source.removeprefix(APK_MIRROR_BASE_URL).strip("/").split("/")
+        return "/" + "/".join(path[: CATEGORY_SEGMENT + 1]) + "/"
+
+    @staticmethod
+    def _listing_urls(download_source: str) -> list[str]:
+        """Return the app listing followed by older APKMirror upload pages for the same app category.
+
+        The listing only shows recent uploads, and older ones are paged under `/uploads/` by the
+        category segment of `/apk/<developer>/<category>/<slug>`.
+        """
+        path = download_source.removeprefix(APK_MIRROR_BASE_URL).strip("/").split("/")
+        category = path[CATEGORY_SEGMENT] if len(path) > CATEGORY_SEGMENT else ""
+        pages = range(2, LISTING_PAGES + 1) if category else range(0)
+        return [download_source, *(f"{APK_MIRROR_BASE_URL}/uploads/page/{n}/?appcategory={category}" for n in pages)]
+
+    def _match_listing_rows(self: Self, versions_container: Any, version: str) -> str | None:
+        """Return the release URL of the listing row whose title names the requested version."""
+        for app_row in versions_container.find_all(class_="appRow"):
+            # APKMirror release slugs can differ from the app source slug, so links must come from the listing row.
+            title = app_row.find(class_="appRowTitle")
+            download_link = app_row.find(class_="downloadLink")
+            if not title or not download_link or not download_link.attr("href"):
+                continue
+            if self._version_matches_title(version, " ".join(title.stripped_strings)):
+                return f"{APK_MIRROR_BASE_URL}{download_link.attrs['href']}"
+        return None
+
+    @staticmethod
+    def _release_page_of(url: str) -> str:
+        """Return the APKMirror release page a resolver answer points into, or an empty string."""
+        parts = urlsplit(url)
+        if f"{parts.scheme}://{parts.hostname}" != APK_MIRROR_BASE_URL:
+            return ""
+        path = parts.path.rstrip("/")
+        if VARIANT_PAGE_MARKER in path:
+            path = path.rsplit("/", 1)[0]
+        return f"{APK_MIRROR_BASE_URL}{path}/" if path.endswith("-release") else ""
+
+    @staticmethod
+    def _resolver_release_page(app: APP, version: str) -> str:
+        """Ask Morphe's resolver for the release page of a version, which also covers renamed release slugs."""
+        if version == "latest":
+            return ""
+        abi = app.archs_to_build[0] if len(app.archs_to_build) == 1 else DEFAULT_RESOLVER_ABI
+        codes = VersionSorter.target_codes(app.compatible_version_codes, version, [abi])
+        code = next(iter(codes)) if len(codes) == 1 else None
+        # APKMirror lists `release-ripped` versions under the upstream `release` name.
+        page = resolve_download_page(app.package_name, version.replace("-ripped", ""), abi, code)
+        release_page = ApkMirror._release_page_of(page)
+        # Trust only a release of this version in the source's listing.
+        expected = ApkMirror._guess_release_url("", version)
+        listing = APK_MIRROR_BASE_URL + ApkMirror._listing_path(app.download_source)
+        if release_page.startswith(listing) and release_page.endswith(expected):
+            logger.debug(f"Morphe resolver found {app.app_name} {version}: {release_page}")
+            return release_page
+        return ""
+
+    @staticmethod
+    def app_exists(package_name: str) -> dict[str, Any]:
+        """Return APKMirror's latest stable release entry for a package, or an empty dict when it has none."""
+        try:
+            entries: list[dict[str, Any]] = (
+                apkmirror_status_check(package_name, exclude=["alpha", "beta"]).get("data") or []
+            )
+        except Exception as exc:  # noqa: BLE001 - the listing scrape is the fallback
+            logger.debug(f"APKMirror app_exists failed for {package_name}: {exc}")
+            return {}
+        entry = next((e for e in entries if e.get("pname") == package_name and e.get("exists")), {})
+        version = entry.get("release", {}).get("version", "")
+        if not entry.get("release", {}).get("link") or any(m in version.lower() for m in UNSTABLE_RELEASE_MARKERS):
+            return {}
+        return entry
+
+    @staticmethod
+    def source_for_package(package_name: str) -> str:
+        """Return the APKMirror app source URL for a package, or an empty string when APKMirror lacks it."""
+        release = ApkMirror.app_exists(package_name).get("release", {})
+        suffix = f"-{release.get('version', '').replace('.', '-')}-release"
+        release_path = release.get("link", "").rstrip("/")
+        if not release_path.endswith(suffix):
+            return ""
+        return f"{APK_MIRROR_BASE_URL}{release_path.removesuffix(suffix)}"
 
     def _find_specific_version_page(self: Self, app: APP, version: str) -> str:
         """Resolve a specific APKMirror release URL, trying a direct URL guess before listing scrape.
@@ -238,26 +347,33 @@ class ApkMirror(Downloader):
                 logger.debug(f"Direct URL resolved for {app.app_name} {version}: {guessed_url}")
                 return guessed_url
             logger.debug(f"Guessed URL {guessed_url} loaded but has no variants table; falling back to listing.")
-        except (APKMirrorAPKDownloadError, ScrapingError):
+        except (APKMirrorAPKDownloadError, ScrapingError) as exc:
             # The guessed URL returned a non-200 or challenge page; fall through to listing-based lookup.
-            logger.debug(f"Guessed URL {guessed_url} failed; falling back to listing scrape.")
+            logger.warning(f"Guessed URL {guessed_url} failed ({exc}); falling back to listing scrape.")
 
-        # Slow path: scrape the first page of the version listing and match by title text.
-        listing_doc = turbohtml.parse(self._extract_source(app.download_source))
-        versions_container = listing_doc.select_one(".listWidget.p-relative")
-        if versions_container is None:
-            # A missing listing container means the source page is not the expected APKMirror app listing.
-            msg = f"Unable to find APKMirror version list for {app.app_name}"
-            raise APKMirrorAPKDownloadError(msg, url=app.download_source)
+        # Slow path: scrape the recent listing pages and match by title text.
+        for page, listing_url in enumerate(self._listing_urls(app.download_source), start=1):
+            try:
+                listing_doc = turbohtml.parse(self._extract_source(listing_url))
+            except (APKMirrorAPKDownloadError, ScrapingError) as exc:
+                if page == 1:
+                    raise
+                # Pages past the last upload return 404, which simply ends the listing.
+                if isinstance(exc, ScrapingError) and exc.is_not_found():
+                    logger.debug(f"APKMirror listing ends before {listing_url}.")
+                else:
+                    logger.warning(f"APKMirror listing page {listing_url} failed ({exc}); stopping pagination.")
+                break
+            versions_container = listing_doc.select_one(".listWidget.p-relative")
+            if versions_container is None:
+                if page == 1:
+                    # A missing listing container means the source page is not the expected APKMirror app listing.
+                    msg = f"Unable to find APKMirror version list for {app.app_name}"
+                    raise APKMirrorAPKDownloadError(msg, url=app.download_source)
+                break
 
-        for app_row in versions_container.find_all(class_="appRow"):
-            # APKMirror release slugs can differ from the app source slug, so links must come from the listing row.
-            title = app_row.find(class_="appRowTitle")
-            download_link = app_row.find(class_="downloadLink")
-            if not title or not download_link or not download_link.attr("href"):
-                continue
-            if self._version_matches_title(version, " ".join(title.stripped_strings)):
-                return f"{APK_MIRROR_BASE_URL}{download_link.attrs['href']}"
+            if release_url := self._match_listing_rows(versions_container, version):
+                return release_url
 
         msg = f"Unable to find {app.app_name} version {version} on APKMirror"
         raise VersionNotFoundError(msg, url=app.download_source)
@@ -278,9 +394,11 @@ class ApkMirror(Downloader):
         :return: Version of downloaded apk
         """
         if not main_page:
-            # APKMirror may rename app slugs independently from source paths, so resolve release URLs from listing HTML.
-            main_page = self._find_specific_version_page(app, version)
-        download_page = self.get_download_page(main_page)
+            # Release slugs can differ from the source slug, so resolve before guessing.
+            main_page = self._resolver_release_page(app, version) or self._find_specific_version_page(app, version)
+        # Only codes for the built archs count, so a missing arm64 build cannot fall through to another arch's build.
+        target_codes = VersionSorter.target_codes(app.compatible_version_codes, version, app.archs_to_build)
+        download_page = self.get_download_page(main_page, target_codes)
         if version == "latest":
             try:
                 logger.info(f"Trying to resolve {app.app_name} version.")
@@ -306,6 +424,10 @@ class ApkMirror(Downloader):
         :param app: Name of the application
         :return: Version of downloaded apk
         """
+        release_link = self.app_exists(app.package_name).get("release", {}).get("link", "")
+        # A package can have several listings, such as an Android TV one.
+        if release_link and release_link.startswith(self._listing_path(app.download_source)):
+            return self.specific_version(app, "latest", APK_MIRROR_BASE_URL + release_link)
         app_main_page = app.download_source
         main_page_doc = turbohtml.parse(self._extract_source(app_main_page))
         versions_container = main_page_doc.select_one(".listWidget.p-relative")
@@ -313,16 +435,18 @@ class ApkMirror(Downloader):
             # Without the listing widget there is no safe way to infer the latest APKMirror release.
             msg = f"Unable to find APKMirror version list for {app.app_name}"
             raise APKMirrorAPKDownloadError(msg, url=app_main_page)
-        app_rows = versions_container.find_all(class_="appRow")
-        version_urls = [
-            href
-            for app_row in app_rows
-            if (dl := app_row.find(class_="downloadLink")) and (href := dl.attr("href"))
-            if (title := app_row.find(class_="appRowTitle"))
-            and "beta" not in "".join(title.strings).lower()
-            and "alpha" not in "".join(title.strings).lower()
-        ]
-        if not version_urls:
+        # Rows are newest first.
+        latest_url = next(
+            (
+                href
+                for app_row in versions_container.find_all(class_="appRow")
+                if (dl := app_row.find(class_="downloadLink")) and (href := dl.attr("href"))
+                if (title := app_row.find(class_="appRowTitle"))
+                and not any(marker in "".join(title.strings).lower() for marker in UNSTABLE_RELEASE_MARKERS)
+            ),
+            None,
+        )
+        if not latest_url:
             msg = f"No stable APKMirror release found for {app.app_name}"
             raise APKMirrorAPKDownloadError(msg, url=app_main_page)
-        return self.specific_version(app, "latest", APK_MIRROR_BASE_URL + max(version_urls))
+        return self.specific_version(app, "latest", APK_MIRROR_BASE_URL + latest_url)

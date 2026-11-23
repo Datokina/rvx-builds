@@ -5,7 +5,7 @@ from typing import Self
 from loguru import logger
 from packaging.version import InvalidVersion, Version
 
-from src.app import APP
+lazy from src.app import APP
 
 
 class ReleaseManager(object):
@@ -22,7 +22,7 @@ class ReleaseManager(object):
             return True
         logger.info(f"New version {new_version}, Old version {old_version}")
         try:
-            return Version(new_version) > Version(old_version)  # type: ignore[no-any-return]
+            return Version(new_version) > Version(old_version)
         except InvalidVersion:
             logger.error("unable to parse version.")
         return False

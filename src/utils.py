@@ -20,12 +20,12 @@ from browserforge.headers import Browser, HeaderGenerator
 from curl_cffi import Response as CurlResponse
 from curl_cffi import Session
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
-from environs import Env
 from loguru import logger
 from requests import Response
-from tenacity import retry, retry_if_result, stop_after_attempt, wait_exponential
+from tenacity import Retrying, retry_if_result, stop_after_attempt, wait_exponential
+lazy from environs import Env
 
-from src.prowl_client import ProwlResponse, fetch_via_prowl, to_cookie_jar
+from src.prowl.client import ProwlResponse, fetch_via_prowl, to_cookie_jar
 from src.signals import get_process_cancel_token
 
 if TYPE_CHECKING:
@@ -211,7 +211,11 @@ def make_request(
         token.wait(delay)
         token.raise_if_cancelled()
 
-    @retry(
+    def _browser() -> ProwlResponse | None:
+        token.raise_if_cancelled()
+        return _browser_retry(url)
+
+    direct_retrying = Retrying(
         retry=retry_if_result(
             lambda response: (
                 not _is_terminal(response) and (response is None or response.status_code != HTTPStatus.FORBIDDEN)
@@ -222,26 +226,20 @@ def make_request(
         sleep=_wait,
         retry_error_callback=lambda state: state.outcome.result() if state.outcome is not None else None,
     )
-    def _direct_with_retries() -> ResponseType | None:
-        return _direct()
-
-    @retry(
+    browser_retrying = Retrying(
         retry=retry_if_result(lambda response: not _is_terminal(response)),
         stop=stop_after_attempt(browser_attempts),
         wait=wait_exponential(multiplier=1, min=1, max=4),
         sleep=_wait,
         retry_error_callback=lambda state: state.outcome.result() if state.outcome is not None else None,
     )
-    def _browser_with_retries() -> ProwlResponse | None:
-        token.raise_if_cancelled()
-        return _browser_retry(url)
 
     update_session_data()
-    response = _direct_with_retries()
+    response: ResponseType | None = direct_retrying(_direct)
     if _is_terminal(response):
         return response
 
-    response = _browser_with_retries()
+    response = browser_retrying(_browser)
     if _is_terminal(response):
         return response
 
@@ -331,7 +329,7 @@ def delete_old_changelog() -> None:
     Path(changelog_file).unlink(missing_ok=True)
 
 
-def apkmirror_status_check(package_name: str) -> Any:
+def apkmirror_status_check(package_name: str, exclude: list[str] | None = None) -> Any:
     """The `apkmirror_status_check` function checks if an app exists on APKMirror.
 
     Parameters
@@ -339,12 +337,16 @@ def apkmirror_status_check(package_name: str) -> Any:
     package_name : str
         The `package_name` parameter is a string that represents the name of the app package to check on
     APKMirror.
+    exclude : list[str] | None
+        Release channels such as `alpha` and `beta` that the latest release must not come from.
 
     Returns
     -------
         the response from the APKMirror API as a JSON object.
     """
-    body = {"pnames": [package_name]}
+    body: dict[str, list[str]] = {"pnames": [package_name]}
+    if exclude:
+        body["exclude"] = exclude
     response = curl_cffi.post(APK_MIRROR_APK_CHECK, json=body, headers=request_header, timeout=60)
     return response.json()
 
@@ -387,7 +389,7 @@ def get_build_revision(previous: dict[str, Any] | None, version: str, build_hash
     return revision + 1
 
 
-def save_patch_info(app: "APP", updates_info: dict[str, Any]) -> dict[str, Any]:
+def save_patch_info(app: APP, updates_info: dict[str, Any]) -> dict[str, Any]:
     """Save version info a patching resources used to a file."""
     updates_info[app.app_name] = {
         app_version_key: app.get_effective_version(),
@@ -409,7 +411,7 @@ def _write_obtainium_json_config(
     app_info: tuple[str, str],
     sources_path: Path,
     repo_info: tuple[str, str],
-    config: "RevancedConfig",
+    config: RevancedConfig,
 ) -> None:
     """Write an Obtainium JSON app config next to its companion HTML source page."""
     app_name, _html_file_name = app_info
@@ -579,7 +581,7 @@ def write_per_app_changelogs(updates_info: dict[str, Any]) -> None:
         file_path.write_text(changelog, encoding="utf_8")
 
 
-def generate_obtainium_export(updates_info: dict[str, Any], config: "RevancedConfig") -> None:
+def generate_obtainium_export(updates_info: dict[str, Any], config: RevancedConfig) -> None:
     """Generate HTML files for Obtainium."""
     if not config.obtainium_export and not config.obtainium_gh_private_export:
         return

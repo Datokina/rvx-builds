@@ -6,9 +6,15 @@ APK_MIRROR_PACKAGE_URL = f"{APK_MIRROR_BASE_URL}/?s=" + "{}"
 APK_MIRROR_APK_CHECK = f"{APK_MIRROR_BASE_URL}/wp-json/apkm/v1/app_exists/"
 UPTODOWN_SUFFIX = "en.uptodown.com/android"
 UPTODOWN_BASE_URL = "https://{}." + UPTODOWN_SUFFIX
+UPTODOWN_API_URL = "https://www.uptodown.app/eapi"
 APK_PURE_BASE_URL = "https://apkpure.net"
 APK_PURE_URL = APK_PURE_BASE_URL + "/-/{}"
 APK_PURE_ICON_URL = APK_PURE_BASE_URL + "/search?q={}"
+APK_PURE_VERSIONS_URL = "https://tapi.pureapk.com/v3/get_app_his_version"
+# Also serves builds the version list omits.
+APK_PURE_DIRECT_URL = "https://d.apkpure.com/b/{kind}/{package}?versionCode={code}"
+APK_CUBE_BASE_URL = "https://apkcube.com"
+MORPHE_RESOLVER_URL = "https://api.morphe.software/v2/web-search/"
 GITHUB_BASE_URL = "https://github.com"
 PLAY_STORE_BASE_URL = "https://play.google.com"
 PLAY_STORE_APK_URL = f"{PLAY_STORE_BASE_URL}/store/apps/details?id=" + "{}"
@@ -107,10 +113,14 @@ apk_sources = {
     ),
     "infinity-plus": f"{APK_MIRROR_BASE_APK_URL}/docile-alligator/infinity-for-reddit-plus/infinity-for-reddit",
     "gmx": f"{APK_MIRROR_BASE_APK_URL}/gmx/gmx-mail/gmx-mail-cloud",
-    "proton-vpn": f"{APK_MIRROR_BASE_APK_URL}/proton-technologies-ag/protonvpn-secure-and-free-vpn/proton-vpn-fast-secure-vpn",
+    "proton-vpn": (
+        f"{APK_MIRROR_BASE_APK_URL}/proton-technologies-ag/protonvpn-secure-and-free-vpn/proton-vpn-fast-secure-vpn"
+    ),
     "photoshop-mix": f"{APK_MIRROR_BASE_APK_URL}/adobe/photoshop-mix/photoshop-mix",
     "disney-plus-fire-tv": f"{APK_MIRROR_BASE_APK_URL}/disney/disney-fire-tv/disney-fire-tv-android-tv",
-    "kleinanzeigen": f"{APK_MIRROR_BASE_APK_URL}/kleinanzeigen-de-gmbh/ebay-kleinanzeigen-for-germany/kleinanzeigen-without-ebay",
+    "kleinanzeigen": (
+        f"{APK_MIRROR_BASE_APK_URL}/kleinanzeigen-de-gmbh/ebay-kleinanzeigen-for-germany/kleinanzeigen-without-ebay"
+    ),
     "letterboxd": f"{APK_MIRROR_BASE_APK_URL}/letterboxd-limited/letterboxd/letterboxd",
     "microsoft-lens": f"{APK_MIRROR_BASE_APK_URL}/microsoft-corporation/office-lens/microsoft-lens-pdf-scanner",
     "fotmob": f"{APK_MIRROR_BASE_APK_URL}/fotmob-as/fotmob-live-soccer-scores/fotmob-soccer-live-scores",

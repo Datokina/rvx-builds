@@ -87,7 +87,7 @@ If you don't define anything in `.env` file or `ENVS` in GitHub Secrets, these c
 
 ## Customization
 
-1. **Officially** Supported values for **APP_NAME\*** are listed under `Code` column [here](../../../changelogs/auto/apps/README.md#supported-apps).
+1. **Officially** Supported values for **APP_NAME\*** are listed under `Code` column [here](../../changelogs/auto/apps/README.md#supported-apps).
    <br>Note that the page syncs itself with the usage of `PATCHES_DL` resources in the `.env` file.
    <br>The sources of original APKs are from one of these apkmirror, apkpure, uptodown & apksos sites. I'm not responsible for any damaged caused.
    If you know any better/safe source to download clean. Open a discussion.
@@ -100,6 +100,9 @@ If you don't define anything in `.env` file or `ENVS` in GitHub Secrets, these c
    <APP_NAME>_PACKAGE_NAME=<package-name-of-the-application>
    ```
 
+   `DL_SOURCE` is optional. Without it the tool looks the package up on APKMIRROR, then UPTODOWN, then APKCUBE,
+   then APKPURE, and downloads from the first site that has it.
+
    You can also provide `DL` to the clean apk instead of providing `DL_SOURCES` as mentioned in this [note](#app-dl).
 
    ```ini
@@ -111,17 +114,24 @@ If you don't define anything in `.env` file or `ENVS` in GitHub Secrets, these c
    1. APKMIRROR - Supports downloading any available version
       1. Link Format - `https://www.apkmirror.com/apk/<organisation-name>/app-name/`
       2. Example Link - https://www.apkmirror.com/apk/google-inc/youtube/
+      3. A specific version's release page is first looked up through Morphe Manager's download resolver, so
+         releases whose page name differs from the link are still found.
    2. UPTODOWN - Supports downloading any available version
       1. Link Format - `https://<app-name>.en.uptodown.com/android`
       2. Example Link - https://spotify.en.uptodown.com/android
-   3. APKPURE - Supports downloading any available version
+   3. APKCUBE - Supports downloading the builds APKCube holds, including the exact build code the patches target
+       1. Link Format - `https://apkcube.com/<app-slug>/<package-name>`
+       2. Example Link - https://apkcube.com/instagram/com.instagram.android
+   4. APKPURE - Supports downloading its 20 newest builds, and older builds whose version code the patches target
        1. Link Format - `https://apkpure.net/-/<package-name>`
        2. Example Link - https://apkpure.net/-/com.google.android.youtube
-   4. APKEEP - Downloads the current Google Play version using [APKEEP](https://github.com/EFForg/apkeep)
-       1. Link Format - `apkeep`
-       2. Example Link - `apkeep`
-       3. You need to provide `APKEEP_EMAIL` and `APKEEP_TOKEN` in [custom GitHub secrets](extras.md#custom-secrets) for authentication.
-       4. Google Play does not provide historical app versions, so APKEEP cannot download a specifically requested older version.
+   5. APKEEP - Downloads using [APKEEP](https://github.com/EFForg/apkeep) from the Google Play provider by default, or from any
+      other provider APKEEP supports when written as `apkeep:<provider>`
+       1. Link Format - `apkeep` or `apkeep:<provider>`
+       2. Example Link - `apkeep`, `apkeep:f-droid`, `apkeep:apk-pure`
+       3. For the Google Play provider, you need to provide `APKEEP_EMAIL` and `APKEEP_TOKEN` in [custom GitHub secrets](extras.md#custom-secrets) for authentication. Other providers do not need them.
+       4. Google Play does not provide historical app versions, so APKEEP cannot download a specifically requested older version from it.
+          APKEEP documents `f-droid` and `apk-pure` as supporting a specific `<APP_NAME>_VERSION`.
 
    <a id="apkeep-device-configuration"></a>
    **APKEEP Google Play device configuration**
@@ -147,7 +157,8 @@ If you don't define anything in `.env` file or `ENVS` in GitHub Secrets, these c
    YOUTUBE_APKEEP_DEVICE_FILE=apks/youtube-device.properties
    ```
 
-   These settings correspond to APKEEP's `device` and `device_properties_file` Google Play options. See the
+   These settings correspond to APKEEP's `device` and `device_properties_file` Google Play options, so they only apply
+   to the Google Play provider. See the
    [upstream device configuration guide](https://github.com/EFForg/apkeep/blob/master/USAGE-google-play.md#device-configuration)
    for details. When no override is configured, APKEEP also defaults to the `UTC` timezone and `en_US` locale.
 
@@ -543,3 +554,6 @@ secrets` in the format -
     ```
 
     Run `./run.sh`; the resulting `prowl:local` image stays local and is never published by rvx-builds.
+
+    `./run.sh` also loads the latest [uBO Lite](https://github.com/uBlockOrigin/uBOL-home) into Prowl's browser.
+    It is downloaded once into the `prowl-extensions` volume. Remove that volume to fetch a newer release.

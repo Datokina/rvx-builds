@@ -7,7 +7,7 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from threading import Lock
-from typing import Any, NamedTuple, Self
+from typing import TYPE_CHECKING, Any, NamedTuple, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -16,11 +16,14 @@ from loguru import logger
 from src._bundle_selector import parse_patch_selection
 from src.apks.repack import get_apk_version
 from src.cli_args import merge_cli_arg_maps
-from src.config import RevancedConfig
 from src.downloader.sources import APKEEP, apk_sources
 from src.exceptions import BuilderError, DownloadError, PatchingFailedError
 from src.jars.normalize import normalize_jar_hash
 from src.utils import pbundles_norm_hashes, slugify, time_zone
+lazy from src.config import RevancedConfig
+
+if TYPE_CHECKING:
+    from src.apks.version_sorter import VersionCodes
 
 
 class _DownloadLockState(NamedTuple):
@@ -85,7 +88,7 @@ class APP(object):
         self.old_key = config.env.bool(f"{app_name}_OLD_KEY".upper(), config.global_old_key)
         self.patches: list[dict[Any, Any]] = []
         self.compatible_versions: set[str] = set()
-        self.compatible_version_codes: dict[str, int] = {}
+        self.compatible_version_codes: VersionCodes = {}
         self.normalize_patch_names = config.env.bool(
             f"{app_name}_NORMALIZE_PATCH_NAMES".upper(),
             config.global_normalize_patch_names,
@@ -138,12 +141,14 @@ class APP(object):
             self.resolved_version = self.resolved_version or requested_version
         else:
             logger.info("Downloading apk to be patched by scrapping")
-            try:
-                if not self.download_source:
-                    self.download_source = apk_sources[self.app_name.lower()].format(self.package_name)
-            except KeyError as key:
-                msg = f"App {self.app_name} not supported officially yet. Please provide download source in env."
-                raise DownloadError(msg) from key
+            if not self.download_source:
+                source = apk_sources.get(self.app_name.lower())
+                self.download_source = (
+                    source.format(self.package_name) if source else DownloaderFactory.discover_source(self.package_name)
+                )
+            if not self.download_source:
+                msg = f"No mirror has {self.package_name} for {self.app_name}. Please provide download source in env."
+                raise DownloadError(msg)
 
             # Version fallback: when env is unset and the patch bundle advertised
             # compatible versions, try them in descending order if the first attempt 404s.
@@ -214,7 +219,7 @@ class APP(object):
         """
         version = self.app_version or "latest"
 
-        if self.download_source == APKEEP:
+        if self.download_source.startswith(APKEEP):
             # Use package@version format for apkeep to ensure uniqueness
             return (self.download_source, f"{self.package_name}@{version}")
 
@@ -371,7 +376,7 @@ class APP(object):
 
         return hashes
 
-    def __str__(self: "APP") -> str:
+    def __str__(self: APP) -> str:
         """Returns the str representation of the app."""
         attrs = vars(self)
         return ", ".join([f"{key}: {value}" for key, value in attrs.items()])
