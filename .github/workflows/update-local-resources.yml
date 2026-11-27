@@ -1,0 +1,84 @@
+name: Update Local Resources
+
+# Keeps apks/kveld-patches.mpp and apks/hosts.txt current.
+#  - kveld9 patches changed -> commit, then dispatch "Build & Release" for ONLY the
+#    apps whose *_PATCHES_DL in .env contains kveld-patches.mpp.
+#  - hosts.txt changed      -> commit only, never triggers a build.
+# New file only - does not modify any existing workflow.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 */6 * * *"   # every 6 hours; change or remove as you like
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: update-local-resources
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download latest kveld9 patches and hosts
+        shell: bash
+        run: |
+          bundle_json=$(curl -fsSL --retry 3 https://git.kvkdns.org/kveld9/kveld-extra-morphe-patches/raw/branch/main/patches-bundle.json)
+          url=$(jq -er .download_url <<< "$bundle_json")
+          echo "Latest patches: $url"
+          curl -fsSL --retry 3 "$url" -o /tmp/kveld-patches.mpp
+          # abort instead of committing an error page (an .mpp is a zip)
+          python3 -c "import zipfile; assert zipfile.is_zipfile('/tmp/kveld-patches.mpp')"
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/fakenews-gambling-porn-social/hosts -o /tmp/hosts.txt
+          test "$(wc -l < /tmp/hosts.txt)" -gt 1000
+
+      - name: Compare with committed files
+        id: diff
+        shell: bash
+        run: |
+          mkdir -p apks
+          strip() { grep -v '^# Date:' "$1" || true; }   # ignore the date-only header change
+          kveld=false; hosts=false
+          if [ ! -f apks/kveld-patches.mpp ] || ! cmp -s /tmp/kveld-patches.mpp apks/kveld-patches.mpp; then kveld=true; fi
+          if [ ! -f apks/hosts.txt ] || ! cmp -s <(strip /tmp/hosts.txt) <(strip apks/hosts.txt); then hosts=true; fi
+          echo "kveld=$kveld" >> "$GITHUB_OUTPUT"
+          echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
+          echo "kveld changed: $kveld | hosts changed: $hosts"
+          [ "$kveld" = true ] && cp /tmp/kveld-patches.mpp apks/kveld-patches.mpp
+          [ "$hosts" = true ] && cp /tmp/hosts.txt apks/hosts.txt
+          exit 0
+
+      - name: Commit changes
+        id: commit
+        if: steps.diff.outputs.kveld == 'true' || steps.diff.outputs.hosts == 'true'
+        shell: bash
+        run: |
+          # -f because .gitignore contains *.mpp
+          git add -f apks/kveld-patches.mpp apks/hosts.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update local resources (kveld=${{ steps.diff.outputs.kveld }}, hosts=${{ steps.diff.outputs.hosts }})"
+          git push
+
+      - name: Build only the apps that use kveld9 patches
+        if: steps.diff.outputs.kveld == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          patch_apps=$(grep -m1 '^PATCH_APPS=' .env | cut -d= -f2- | tr -d '\r ')
+          apps=""
+          for app in $(grep -E '^[A-Za-z0-9_-]+_PATCHES_DL=.*kveld-patches\.mpp' .env | grep -v '^GLOBAL_' | sed -E 's/_PATCHES_DL=.*//' | tr 'A-Z' 'a-z' || true); do
+            case ",$patch_apps," in *",$app,"*) apps="${apps:+$apps,}$app" ;; esac
+          done
+          if [ -z "$apps" ]; then
+            echo "No app in PATCH_APPS uses local://kveld-patches.mpp yet - not building."
+            exit 0
+          fi
+          echo "Building: $apps"
+          gh workflow run build-apk.yml --ref "${{ github.ref_name }}" -f PREFERRED_PATCH_APPS="$apps"
