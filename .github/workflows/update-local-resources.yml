@@ -9,7 +9,7 @@ name: Update Local Resources
 on:
   workflow_dispatch:
   schedule:
-    - cron: "23 */6 * * *"   # every 6 hours; change or remove as you like
+    - cron: "23 6 * * *"   # every 6 hours; change or remove as you like
 
 permissions:
   contents: write
